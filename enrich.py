@@ -122,7 +122,7 @@ def write_feed(outpath, title, link, description, items, emoji_by_sport,
         emoji = emoji_by_sport.get(sport, "🎲")
 
         # Item title: スポーツ速報｜<SPORT>｜<EMOJI> [<SPORT>] <short-title>
-        display_title = f"スポーツ速報｜{sport_label}｜{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
+        display_title = f"{sport_label}｜{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
         summary_short = shorten(it["summary"], DESC_MAX)
 
         fe = fg.add_entry()
@@ -172,7 +172,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     # Combined feed (Japanese title by default)
-    feed_title = cfg.get("feed_title", "スポーツ速報（ベットリンク付き）")
+    feed_title = cfg.get("feed_title", "スポーツ速報")
     feed_link  = cfg.get("feed_link", "https://example.com/feed.xml")
     feed_desc  = cfg.get("feed_description", "")
 

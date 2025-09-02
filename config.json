@@ -16,25 +16,25 @@
       "name": "NPB",
       "sport": "npb",
       "url": "https://www.nikkansports.com/baseball/professional/atom.xml",
-      "target_url": "https://trustdice.win/ja/sports/baseball/japan/npb-1723217780884512768"
+      "target_url": "https://cutt.ly/drZtFFsl"
     },
     {
       "name": "Jリーグ",
       "sport": "jleague",
       "url": "https://web.gekisaka.jp/rss/jleague",
-      "target_url": "https://trustdice.win/ja/sports/soccer/japan/jleague-cup-1714283915738488832"
+      "target_url": "https://cutt.ly/drZtF3iK"
     },
     {
       "name": "競馬",
       "sport": "keiba",
       "url": "https://www.nikkansports.com/keiba/atom.xml",
-      "target_url": "https://trustdice.win/ja/sports/horse-racing-55"
+      "target_url": "https://cutt.ly/MrZtGhE3"
     },
     {
       "name": "MLB",
       "sport": "mlb",
       "url": "https://www.nikkansports.com/baseball/mlb/atom.xml",
-      "target_url": "https://trustdice.win/ja/sports/baseball/usa/mlb-1671175995522211840"
+      "target_url": "https://cutt.ly/2rZtGJSG"
     }
   ]
 }
