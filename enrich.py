@@ -77,7 +77,8 @@ def collect_demo_items(cfg, per_sport=3):
         sport = feed["sport"]
         target_url = feed["target_url"]
         name = feed.get("name", sport.upper())
-        for i, t in enumerate(demo_titles.get(sport, [f"{sport.upper()} Demo News"]))[:per_sport]:
+        titles = demo_titles.get(sport, [f"{sport.upper()} Demo News"])
+        for i, t in enumerate(titles[:per_sport]):
             pub_dt = now - timedelta(minutes=(i * 7))
             items.append({
                 "raw_title": t,
