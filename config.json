@@ -1,0 +1,37 @@
+{
+  "feeds": [
+    {
+      "name": "NPB（日刊スポーツ）",
+      "url": "https://www.nikkansports.com/baseball/professional/atom.xml",
+      "sport": "npb",
+      "target_url": "https://trustdice.win/ja/sports/baseball/japan/npb-1723217780884512768"
+    },
+    {
+      "name": "Jリーグ（ゲキサカ）",
+      "url": "https://web.gekisaka.jp/rss/jleague",
+      "sport": "jleague",
+      "target_url": "https://trustdice.win/ja/sports/soccer/japan/jleague-cup-1714283915738488832"
+    },
+    {
+      "name": "競馬（日刊スポーツ）",
+      "url": "https://www.nikkansports.com/keiba/atom.xml",
+      "sport": "keiba",
+      "target_url": "https://trustdice.win/ja/sports/horse-racing-55"
+    },
+    {
+      "name": "MLB（日刊スポーツ）",
+      "url": "https://www.nikkansports.com/baseball/mlb/atom.xml",
+      "sport": "mlb",
+      "target_url": "https://trustdice.win/ja/sports/baseball/usa/mlb-1671175995522211840"
+    }
+  ],
+  "feed_title": "JP Sports Betting Digest (TrustDice-linked)",
+  "feed_link": "https://example.com/feed.xml",
+  "feed_description": "日本のスポーツニュース（NPB/Jリーグ/競馬/MLB）に、TrustDiceの該当スポーツページへのリンクを付与したダイジェストRSS。",
+  "emoji_by_sport": {
+    "npb": "⚾",
+    "jleague": "⚽",
+    "keiba": "🐎",
+    "mlb": "⚾"
+  }
+}
