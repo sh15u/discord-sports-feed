@@ -6,10 +6,11 @@ import pytz
 import feedparser
 from feedgen.feed import FeedGenerator
 
+# --- Tunables ---------------------------------------------------------------
+TITLE_MAX = 70   # max chars shown in item title
+DESC_MAX  = 120  # max chars shown in item description
 JST = pytz.timezone("Asia/Tokyo")
-
-TITLE_MAX = 70     # tweak if you want shorter titles
-DESC_MAX  = 120    # tweak if you want shorter descriptions
+# ---------------------------------------------------------------------------
 
 def load_config(path: str):
     with open(path, "r", encoding="utf-8") as f:
@@ -92,7 +93,8 @@ def collect_demo_items(cfg, per_sport=3):
     items.sort(key=lambda x: x["published"], reverse=True)
     return items
 
-def write_feed(outpath, title, link, description, items, emoji_by_sport, guid_suffix="", limit_per_sport=3):
+def write_feed(outpath, title, link, description, items, emoji_by_sport,
+               guid_suffix="", limit_per_sport=3, cta_text="ベットはこちら"):
     # cap items per sport to reduce spam
     capped, counts = [], {}
     for it in items:
@@ -120,11 +122,15 @@ def write_feed(outpath, title, link, description, items, emoji_by_sport, guid_su
         fe.title(display_title)
         fe.link(href=it["link"])
 
-        # CTA FIRST, bold + underline; links in <...> to prevent embeds
-        cta = f"{emoji} __**ベットはこちら**__ → <{it['bet_url']}>"
-        desc_lines = [cta]
+        # One CTA at the TOP (bold+underline) as a markdown link → no image preview
+        cta_top = f"{emoji} __**[{cta_text}]({it['bet_url']})**__"
+
+        # Keep embeds off: also add a markdown article link (no preview)
+        desc_lines = [cta_top]
         if summary_short:
             desc_lines.append(summary_short)
+        desc_lines.append(f"📰 [記事を読む]({it['link']})")
+
         fe.description("\n\n".join(desc_lines))
         fe.pubDate(it["published"])
 
@@ -136,19 +142,18 @@ def main():
     p = argparse.ArgumentParser(description="JP Sports Enriched RSS")
     p.add_argument("--demo", action="store_true", help="Generate demo items")
     p.add_argument("--per-sport", type=int, default=3, help="Max items per sport (anti-spam)")
-    p.add_argument("--demo-run-id", type=str, default="", help="Force-unique IDs for demo runs")
     args = p.parse_args()
 
     root = os.path.dirname(os.path.abspath(__file__))
     cfg = load_config(os.path.join(root, "config.json"))
     emoji_by_sport = cfg.get("emoji_by_sport", {})
+    cta_cfg = cfg.get("cta", {})
+    cta_text = cta_cfg.get("text", "ベットはこちら")
 
-    guid_suffix = ""
-    if args.demo:
-        guid_suffix = args.demo_run_id or str(int(time.time()))
-        all_items = collect_demo_items(cfg, per_sport=args.per_sport)
-    else:
-        all_items = collect_items(cfg)
+    # Demo runs get a unique GUID suffix so MEE6 treats them as new
+    guid_suffix = str(int(time.time())) if args.demo else ""
+
+    all_items = collect_demo_items(cfg, per_sport=args.per_sport) if args.demo else collect_items(cfg)
 
     outdir = os.path.join(root, "dist")
     os.makedirs(outdir, exist_ok=True)
@@ -156,10 +161,10 @@ def main():
     # Combined
     write_feed(
         os.path.join(outdir, "feed.xml"),
-        cfg.get("feed_title", "JP Sports Betting Digest"),
+        cfg.get("feed_title", "スポーツ速報（ベットリンク付き）"),
         cfg.get("feed_link", "https://example.com/feed.xml"),
         cfg.get("feed_description", ""),
-        all_items, emoji_by_sport, guid_suffix, args.per_sport
+        all_items, emoji_by_sport, guid_suffix, args.per_sport, cta_text
     )
 
     # Per-sport (always emit files)
@@ -168,14 +173,16 @@ def main():
         by_sport.setdefault(it["sport"], []).append(it)
 
     sport_files = {"npb": "npb.xml", "jleague": "jleague.xml", "keiba": "keiba.xml", "mlb": "mlb.xml"}
+    jp_names = {"npb": "NPB", "jleague": "Jリーグ", "keiba": "競馬", "mlb": "MLB"}
     base_link = cfg.get("feed_link","https://example.com/feed.xml").rsplit("/",1)[0]
 
     for sport, filename in sport_files.items():
         items = by_sport.get(sport, [])
-        title = f"{cfg.get('feed_title','JP Sports Betting Digest')} - {sport.upper()}"
+        title = f"{cfg.get('feed_title','スポーツ速報（ベットリンク付き）')} - {jp_names.get(sport, sport.upper())}"
         link  = f"{base_link}/{filename}"
-        desc  = f"{cfg.get('feed_description','')}（{sport.upper()}のみ）"
-        write_feed(os.path.join(outdir, filename), title, link, desc, items, emoji_by_sport, guid_suffix, args.per_sport)
+        desc  = f"{cfg.get('feed_description','')}（{jp_names.get(sport, sport.upper())}のみ）"
+        write_feed(os.path.join(outdir, filename), title, link, desc, items,
+                   emoji_by_sport, guid_suffix, args.per_sport, cta_text)
 
 if __name__ == "__main__":
     main()
