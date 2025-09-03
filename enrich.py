@@ -2,231 +2,155 @@
 import os, json, hashlib, argparse, time, re
 from datetime import datetime, timedelta
 from dateutil import parser as dtparse
-import pytz
-import feedparser
+import pytz, feedparser
 from feedgen.feed import FeedGenerator
 
-# ---------------- Tunables ----------------
-TITLE_MAX = 70                     # max chars shown in item title
-DESC_MAX  = 120                    # max chars shown in item description
-PER_SPORT_CAP_DEFAULT = 3          # items per sport per run (anti-spam)
+TITLE_MAX = 70
+DESC_MAX  = 120
+PER_SPORT_CAP_DEFAULT = 3
 JST = pytz.timezone("Asia/Tokyo")
-# ------------------------------------------
 
-def load_config(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def normalize_dt(dt_str: str):
-    if not dt_str:
-        return None
+def load_config(p): return json.load(open(p, "r", encoding="utf-8"))
+def normalize_dt(s):
+    if not s: return None
     try:
-        dt = dtparse.parse(dt_str)
-        if not dt.tzinfo:
-            dt = pytz.utc.localize(dt)
+        dt = dtparse.parse(s);  dt = dt if dt.tzinfo else pytz.utc.localize(dt)
         return dt.astimezone(JST)
-    except Exception:
-        return None
+    except Exception: return None
+def make_guid(t): return hashlib.sha1(t.encode("utf-8")).hexdigest()
+def shorten(s, n): s=(s or "").strip();  return s if len(s)<=n else s[:max(0,n-1)].rstrip()+"…"
 
-def make_guid(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-def shorten(s: str, n: int):
-    s = (s or "").strip()
-    return s if len(s) <= n else s[: max(0, n - 1)].rstrip() + "…"
-
-# --------- match-only filtering helpers ----------
+# ---------- match-only filters ----------
 def compile_filters(cfg, sport):
-    flt_root = cfg.get("filters") or {}
-    flt = flt_root.get(sport, {})
+    root = cfg.get("filters") or {}
+    flt  = root.get(sport, {})
     inc = [re.compile(p, re.IGNORECASE) for p in flt.get("include", [])]
     exc = [re.compile(p, re.IGNORECASE) for p in flt.get("exclude", [])]
-    mode = flt_root.get("mode", "off")
-    return mode, inc, exc
-
+    return root.get("mode","off"), inc, exc
 def looks_like_match(cfg, sport, title, summary):
     mode, inc, exc = compile_filters(cfg, sport)
-    if mode != "match_only":
-        return True
+    if mode != "match_only": return True
     text = f"{title} {summary}"
-
-    if inc and not any(r.search(text) for r in inc):
-        return False
-    if exc and any(r.search(text) for r in exc):
-        return False
-
-    if sport in ("npb", "mlb", "jleague"):
-        if not re.search(r"\bvs\b|対|試合|スタメン|先発|ハイライト|結果|スコア", text, re.IGNORECASE):
-            return False
-    if sport == "keiba":
-        if not re.search(r"出走|枠順|結果|払戻|確定|レース|予想", text):
-            return False
+    if inc and not any(r.search(text) for r in inc): return False
+    if exc and any(r.search(text) for r in exc): return False
+    if sport in ("npb","mlb","jleague") and not re.search(r"\bvs\b|対|試合|スタメン|先発|ハイライト|結果|スコア", text, re.I): return False
+    if sport == "keiba" and not re.search(r"出走|枠順|結果|払戻|確定|レース|予想", text): return False
     return True
-# -------------------------------------------------
+# ----------------------------------------
 
 def collect_items(cfg):
-    seen = set()
-    items = []
+    seen, items = set(), []
     for feed in cfg["feeds"]:
-        url = feed["url"]
-        sport = feed["sport"]
-        target_url = feed["target_url"]
-        name = feed.get("name", sport.upper())
-        parsed = feedparser.parse(url)
+        parsed = feedparser.parse(feed["url"])
         for e in parsed.entries:
             title = getattr(e, "title", "").strip()
+            summary = getattr(e, "summary", "").strip() if hasattr(e,"summary") else ""
             link = getattr(e, "link", "").strip()
-            summary = getattr(e, "summary", "").strip() if hasattr(e, "summary") else ""
-            published = e.get("published") or e.get("updated") or ""
-
-            if not looks_like_match(cfg, sport, title, summary):
-                continue
-
+            if not looks_like_match(cfg, feed["sport"], title, summary): continue
             sig = (link or "") + "||" + title
-            if sig in seen:
-                continue
+            if sig in seen: continue
             seen.add(sig)
-            pub_dt = normalize_dt(published) or datetime.now(JST)
             items.append({
-                "raw_title": title,
-                "link": link or url,
-                "summary": summary,
-                "published": pub_dt,
-                "sport": sport,
-                "bet_url": target_url,
-                "source_name": name
+                "raw_title": title, "summary": summary, "link": link or feed["url"],
+                "published": normalize_dt(e.get("published") or e.get("updated")) or datetime.now(JST),
+                "sport": feed["sport"], "bet_url": feed["target_url"], "source_name": feed.get("name", feed["sport"].upper())
             })
     items.sort(key=lambda x: x["published"], reverse=True)
     return items
 
 def collect_demo_items(cfg, per_sport=PER_SPORT_CAP_DEFAULT, run_id=""):
     now = datetime.now(JST)
-    demo_titles = {
-        "npb": ["阪神 vs 巨人 きょう18:00 先発発表", "広島が接戦を制す、終盤で逆転", "パ・リーグ投手戦 注目ポイント"],
-        "jleague": ["浦和 vs 川崎F プレビュー", "神戸、首位攻防戦を制す", "横浜FM 新戦力が躍動"],
-        "keiba": ["セントライト記念 展望", "重賞トリプルトレンド：注目馬3頭", "今週の追い切り評価"],
-        "mlb": ["ドジャース 大谷がマルチ安打", "パドレス ダルビッシュ復帰登板", "カブス 鈴木誠也が決勝打"]
+    demo = {
+        "npb":["阪神 vs 巨人 きょう18:00 先発発表","広島が接戦を制す、終盤で逆転","パ・リーグ投手戦 注目ポイント"],
+        "jleague":["浦和 vs 川崎F プレビュー","神戸、首位攻防戦を制す","横浜FM 新戦力が躍動"],
+        "keiba":["セントライト記念 展望","重賞トリプルトレンド：注目馬3頭","今週の追い切り評価"],
+        "mlb":["ドジャース 大谷がマルチ安打","パドレス ダルビッシュ復帰登板","カブス 鈴木誠也が決勝打"]
     }
-    items = []
-    for feed in cfg["feeds"]:
-        sport = feed["sport"]
-        target_url = feed["target_url"]
-        name = feed.get("name", sport.upper())
-        titles = demo_titles.get(sport, [f"{sport.upper()} Demo News"])
-        for i, t in enumerate(titles[:per_sport]):
-            pub_dt = now - timedelta(minutes=(i * 7))
-            demo_link = f"https://example.com/demo-article?s={sport}&r={run_id}&i={i}"  # unique per run
+    items=[]
+    for f in cfg["feeds"]:
+        titles = demo.get(f["sport"], [f"{f['sport'].upper()} Demo News"])
+        for i,t in enumerate(titles[:per_sport]):
             items.append({
-                "raw_title": t,
-                "link": demo_link,
-                "summary": "（デモ）これはテスト用のニュース要約です。実運用では実際の記事の概要が入ります。",
-                "published": pub_dt,
-                "sport": sport,
-                "bet_url": target_url,
-                "source_name": name
+                "raw_title": t, "summary":"（デモ）テスト要約。", "link": f"https://example.com/demo?s={f['sport']}&r={run_id}&i={i}",
+                "published": now - timedelta(minutes=i*7), "sport": f["sport"], "bet_url": f["target_url"], "source_name": f.get("name", f["sport"].upper())
             })
-    items.sort(key=lambda x: x["published"], reverse=True)
-    return items
+    items.sort(key=lambda x: x["published"], reverse=True);  return items
 
-def write_feed(outpath, title, link, description, items, emoji_by_sport,
+def write_feed(outpath, channel_title, self_link, channel_desc, items, emoji_map,
                guid_suffix="", limit_per_sport=PER_SPORT_CAP_DEFAULT, cta_text="ベットはこちら"):
-    capped, counts = [], {}
+    capped, cnt = [], {}
     for it in items:
-        k = it["sport"]
-        counts[k] = counts.get(k, 0) + 1
-        if counts[k] <= limit_per_sport:
-            capped.append(it)
+        k=it["sport"]; cnt[k]=cnt.get(k,0)+1
+        if cnt[k] <= limit_per_sport: capped.append(it)
 
     fg = FeedGenerator()
-    fg.id(link)
-    fg.title(title)
-    fg.link(href=link, rel='self')
-    fg.language("ja")
-    fg.description(description)
+    fg.id(self_link); fg.title(channel_title); fg.link(href=self_link, rel='self')
+    fg.language("ja"); fg.description(channel_desc)
 
-    jp_names = {"npb": "NPB", "jleague": "Jリーグ", "keiba": "競馬", "mlb": "MLB"}
-
+    jp = {"npb":"NPB","jleague":"Jリーグ","keiba":"競馬","mlb":"MLB"}
     for it in capped:
-        sport = it["sport"]
-        sport_label = jp_names.get(sport, sport.upper())
-        emoji = emoji_by_sport.get(sport, "🎲")
+        sport = it["sport"]; sport_label = jp.get(sport, sport.upper())
+        emoji = emoji_map.get(sport, "🎲")
 
-        # NEW title format: 📣 スポーツ速報｜⚽ [Jリーグ] <short-title>
-        display_title = f"📣 スポーツ速報｜{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
+        # item title: only "⚾ [NPB] <short title>"
+        display_title = f"{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
         summary_short = shorten(it["summary"], DESC_MAX)
 
         fe = fg.add_entry()
-        guid_seed = it["link"] + "||" + it["raw_title"] + "||" + guid_suffix
-        fe.id(make_guid(guid_seed))
+        fe.id(make_guid(it["link"]+"||"+it["raw_title"]+"||"+guid_suffix))
         fe.title(display_title)
+        # no fe.link(...) → prevents embed unfurl
 
-        # do NOT set fe.link(...) to avoid MEE6 auto-embeds
-        # fe.link(href=it["link"])
-
-        # CTA first (👉 + bold+underline). Links wrapped with <> to kill previews.
         cta_top = f"👉 __**[{cta_text}]({it['bet_url']})**__"
-        article_link = f"<{it['link']}>"  # angle brackets to suppress unfurl
-
-        desc_lines = [cta_top]
-        if summary_short:
-            desc_lines.append(summary_short)
-        desc_lines.append(f"📰 記事を読む {article_link}")
-
-        fe.description("\n\n".join(desc_lines))
-        fe.pubDate(it["published"])
+        article_link = f"<{it['link']}>"
+        desc = [cta_top] + ([summary_short] if summary_short else []) + [f"📰 記事を読む {article_link}"]
+        fe.description("\n\n".join(desc)); fe.pubDate(it["published"])
 
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
     fg.rss_file(outpath, pretty=True, encoding="utf-8")
     print(f"Wrote {outpath} ({len(capped)} items)")
 
 def main():
-    p = argparse.ArgumentParser(description="JP Sports Enriched RSS")
-    p.add_argument("--demo", action="store_true", help="Generate demo items")
-    p.add_argument("--per-sport", type=int, default=PER_SPORT_CAP_DEFAULT, help="Max items per sport (anti-spam)")
-    args = p.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--demo", action="store_true"); ap.add_argument("--per-sport", type=int, default=PER_SPORT_CAP_DEFAULT)
+    args = ap.parse_args()
 
     root = os.path.dirname(os.path.abspath(__file__))
-    cfg = load_config(os.path.join(root, "config.json"))
-    emoji_by_sport = cfg.get("emoji_by_sport", {})
-    cta_cfg = cfg.get("cta", {})
-    cta_text = cta_cfg.get("text", "ベットはこちら")
+    cfg  = load_config(os.path.join(root,"config.json"))
+    emoji = cfg.get("emoji_by_sport", {}); cta_text = cfg.get("cta",{}).get("text","ベットはこちら")
+    suppress_title = cfg.get("suppress_channel_title", True)
+    invisible = "\u200B" if suppress_title else None
 
     if args.demo:
-        run_id = str(int(time.time()))
-        guid_suffix = run_id
-        all_items = collect_demo_items(cfg, per_sport=args.per_sport, run_id=run_id)
+        guid = str(int(time.time()))
+        items = collect_demo_items(cfg, per_sport=args.per_sport, run_id=guid)
     else:
-        guid_suffix = ""
-        all_items = collect_items(cfg)
+        guid = ""; items = collect_items(cfg)
 
-    outdir = os.path.join(root, "dist")
-    os.makedirs(outdir, exist_ok=True)
+    outdir = os.path.join(root,"dist"); os.makedirs(outdir, exist_ok=True)
 
-    feed_title = cfg.get("feed_title", "スポーツ速報（ベットリンク付き）")
-    feed_link  = cfg.get("feed_link", "https://example.com/feed.xml")
-    feed_desc  = cfg.get("feed_description", "")
-
+    # Combined feed
+    combined_title = invisible if invisible is not None else cfg.get("feed_title","スポーツ速報（ベットリンク付き）")
     write_feed(
-        os.path.join(outdir, "feed.xml"),
-        feed_title, feed_link, feed_desc,
-        all_items, emoji_by_sport, guid_suffix, args.per_sport, cta_text
+        os.path.join(outdir,"feed.xml"),
+        combined_title,
+        cfg.get("feed_link","https://example.com/feed.xml"),
+        cfg.get("feed_description",""),
+        items, emoji, guid, args.per_sport, cta_text
     )
 
-    by_sport = {}
-    for it in all_items:
-        by_sport.setdefault(it["sport"], []).append(it)
+    # Per sport feeds
+    by = {}
+    for it in items: by.setdefault(it["sport"], []).append(it)
+    jp = {"npb":"NPB","jleague":"Jリーグ","keiba":"競馬","mlb":"MLB"}
+    base_link = cfg.get("feed_link","https://example.com/feed.xml").rsplit("/",1)[0]
 
-    sport_files = {"npb": "npb.xml", "jleague": "jleague.xml", "keiba": "keiba.xml", "mlb": "mlb.xml"}
-    jp_names = {"npb": "NPB", "jleague": "Jリーグ", "keiba": "競馬", "mlb": "MLB"}
-    base_link = feed_link.rsplit("/", 1)[0] if "/" in feed_link else feed_link
-
-    for sport, filename in sport_files.items():
-        items = by_sport.get(sport, [])
-        title = f"{feed_title}｜{jp_names.get(sport, sport.upper())}"
-        link  = f"{base_link}/{filename}"
-        desc  = f"{feed_desc}（{jp_names.get(sport, sport.upper())}のみ）"
-        write_feed(os.path.join(outdir, filename), title, link, desc, items,
-                   emoji_by_sport, guid_suffix, args.per_sport, cta_text)
+    files = {"npb":"npb.xml","jleague":"jleague.xml","keiba":"keiba.xml","mlb":"mlb.xml"}
+    for sport, fname in files.items():
+        title = invisible if invisible is not None else f"{cfg.get('feed_title','スポーツ速報（ベットリンク付き）')}｜{jp.get(sport, sport.upper())}"
+        link  = f"{base_link}/{fname}"
+        desc  = f"{cfg.get('feed_description','')}（{jp.get(sport, sport.upper())}のみ）"
+        write_feed(os.path.join(outdir,fname), title, link, desc, by.get(sport, []), emoji, guid, args.per_sport, cta_text)
 
 if __name__ == "__main__":
     main()

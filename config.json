@@ -2,6 +2,7 @@
   "feed_title": "スポーツ速報",
   "feed_link": "https://sh15u.github.io/discord-sports-feed/feed.xml",
   "feed_description": "主要スポーツのニュースを配信します。",
+  "suppress_channel_title": true,
   "emoji_by_sport": {
     "npb": "⚾",
     "jleague": "⚽",
