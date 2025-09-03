@@ -40,7 +40,7 @@
     {
       "name": "Jリーグ",
       "sport": "jleague",
-      "url": "https://web.gekisaka.jp/rss/jleague",
+      "url": "https://web.gekisaka.jp/feed?category=domestic",
       "target_url": "https://cutt.ly/drZtF3iK"
     },
     {
