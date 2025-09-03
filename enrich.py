@@ -50,14 +50,11 @@ def looks_like_match(cfg, sport, title, summary):
         return True
     text = f"{title} {summary}"
 
-    # include rules: require at least one if provided
     if inc and not any(r.search(text) for r in inc):
         return False
-    # exclude rules: reject if any matched
     if exc and any(r.search(text) for r in exc):
         return False
 
-    # extra heuristics
     if sport in ("npb", "mlb", "jleague"):
         if not re.search(r"\bvs\b|対|試合|スタメン|先発|ハイライト|結果|スコア", text, re.IGNORECASE):
             return False
@@ -82,7 +79,6 @@ def collect_items(cfg):
             summary = getattr(e, "summary", "").strip() if hasattr(e, "summary") else ""
             published = e.get("published") or e.get("updated") or ""
 
-            # filter out non-match content
             if not looks_like_match(cfg, sport, title, summary):
                 continue
 
@@ -104,7 +100,6 @@ def collect_items(cfg):
     return items
 
 def collect_demo_items(cfg, per_sport=PER_SPORT_CAP_DEFAULT, run_id=""):
-    """Create fake items for instant testing. Ensures unique links per run so MEE6 posts them."""
     now = datetime.now(JST)
     demo_titles = {
         "npb": ["阪神 vs 巨人 きょう18:00 先発発表", "広島が接戦を制す、終盤で逆転", "パ・リーグ投手戦 注目ポイント"],
@@ -135,8 +130,6 @@ def collect_demo_items(cfg, per_sport=PER_SPORT_CAP_DEFAULT, run_id=""):
 
 def write_feed(outpath, title, link, description, items, emoji_by_sport,
                guid_suffix="", limit_per_sport=PER_SPORT_CAP_DEFAULT, cta_text="ベットはこちら"):
-    """Build a single RSS file with compact, image-free entries and a bold CTA on top."""
-    # cap items per sport to reduce spam
     capped, counts = [], {}
     for it in items:
         k = it["sport"]
@@ -158,24 +151,26 @@ def write_feed(outpath, title, link, description, items, emoji_by_sport,
         sport_label = jp_names.get(sport, sport.upper())
         emoji = emoji_by_sport.get(sport, "🎲")
 
-        # Item title: スポーツ速報｜<SPORT>｜<EMOJI> [<SPORT>] <short-title>
-        display_title = f"{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
+        # NEW title format: 📣 スポーツ速報｜⚽ [Jリーグ] <short-title>
+        display_title = f"📣 スポーツ速報｜{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
         summary_short = shorten(it["summary"], DESC_MAX)
 
         fe = fg.add_entry()
         guid_seed = it["link"] + "||" + it["raw_title"] + "||" + guid_suffix
         fe.id(make_guid(guid_seed))
         fe.title(display_title)
-        fe.link(href=it["link"])
 
-        # One CTA at the TOP (👉 + bold+underline) as a markdown link (suppresses previews)
+        # do NOT set fe.link(...) to avoid MEE6 auto-embeds
+        # fe.link(href=it["link"])
+
+        # CTA first (👉 + bold+underline). Links wrapped with <> to kill previews.
         cta_top = f"👉 __**[{cta_text}]({it['bet_url']})**__"
+        article_link = f"<{it['link']}>"  # angle brackets to suppress unfurl
 
-        # Article link as markdown (not bare URL) to avoid previews
         desc_lines = [cta_top]
         if summary_short:
             desc_lines.append(summary_short)
-        desc_lines.append(f"📰 [記事を読む]({it['link']})")
+        desc_lines.append(f"📰 記事を読む {article_link}")
 
         fe.description("\n\n".join(desc_lines))
         fe.pubDate(it["published"])
@@ -196,7 +191,6 @@ def main():
     cta_cfg = cfg.get("cta", {})
     cta_text = cta_cfg.get("text", "ベットはこちら")
 
-    # Demo runs get a unique GUID suffix & link salt so MEE6 treats them as new
     if args.demo:
         run_id = str(int(time.time()))
         guid_suffix = run_id
@@ -208,20 +202,16 @@ def main():
     outdir = os.path.join(root, "dist")
     os.makedirs(outdir, exist_ok=True)
 
-    # Combined feed (Japanese title by default)
-    feed_title = cfg.get("feed_title", "スポーツ速報")
+    feed_title = cfg.get("feed_title", "スポーツ速報（ベットリンク付き）")
     feed_link  = cfg.get("feed_link", "https://example.com/feed.xml")
     feed_desc  = cfg.get("feed_description", "")
 
     write_feed(
         os.path.join(outdir, "feed.xml"),
-        feed_title,
-        feed_link,
-        feed_desc,
+        feed_title, feed_link, feed_desc,
         all_items, emoji_by_sport, guid_suffix, args.per_sport, cta_text
     )
 
-    # Per-sport feeds (always emit files)
     by_sport = {}
     for it in all_items:
         by_sport.setdefault(it["sport"], []).append(it)
