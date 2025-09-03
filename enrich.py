@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, hashlib, argparse, time
+import os, json, hashlib, argparse, time, re
 from datetime import datetime, timedelta
 from dateutil import parser as dtparse
 import pytz
@@ -7,9 +7,9 @@ import feedparser
 from feedgen.feed import FeedGenerator
 
 # ---------------- Tunables ----------------
-TITLE_MAX = 70    # max chars shown in item title
-DESC_MAX  = 120   # max chars shown in item description
-PER_SPORT_CAP_DEFAULT = 3  # items per sport per run (anti-spam)
+TITLE_MAX = 70                     # max chars shown in item title
+DESC_MAX  = 120                    # max chars shown in item description
+PER_SPORT_CAP_DEFAULT = 3          # items per sport per run (anti-spam)
 JST = pytz.timezone("Asia/Tokyo")
 # ------------------------------------------
 
@@ -35,6 +35,38 @@ def shorten(s: str, n: int):
     s = (s or "").strip()
     return s if len(s) <= n else s[: max(0, n - 1)].rstrip() + "…"
 
+# --------- match-only filtering helpers ----------
+def compile_filters(cfg, sport):
+    flt_root = cfg.get("filters") or {}
+    flt = flt_root.get(sport, {})
+    inc = [re.compile(p, re.IGNORECASE) for p in flt.get("include", [])]
+    exc = [re.compile(p, re.IGNORECASE) for p in flt.get("exclude", [])]
+    mode = flt_root.get("mode", "off")
+    return mode, inc, exc
+
+def looks_like_match(cfg, sport, title, summary):
+    mode, inc, exc = compile_filters(cfg, sport)
+    if mode != "match_only":
+        return True
+    text = f"{title} {summary}"
+
+    # include rules: require at least one if provided
+    if inc and not any(r.search(text) for r in inc):
+        return False
+    # exclude rules: reject if any matched
+    if exc and any(r.search(text) for r in exc):
+        return False
+
+    # extra heuristics
+    if sport in ("npb", "mlb", "jleague"):
+        if not re.search(r"\bvs\b|対|試合|スタメン|先発|ハイライト|結果|スコア", text, re.IGNORECASE):
+            return False
+    if sport == "keiba":
+        if not re.search(r"出走|枠順|結果|払戻|確定|レース|予想", text):
+            return False
+    return True
+# -------------------------------------------------
+
 def collect_items(cfg):
     seen = set()
     items = []
@@ -49,6 +81,11 @@ def collect_items(cfg):
             link = getattr(e, "link", "").strip()
             summary = getattr(e, "summary", "").strip() if hasattr(e, "summary") else ""
             published = e.get("published") or e.get("updated") or ""
+
+            # filter out non-match content
+            if not looks_like_match(cfg, sport, title, summary):
+                continue
+
             sig = (link or "") + "||" + title
             if sig in seen:
                 continue
@@ -122,7 +159,7 @@ def write_feed(outpath, title, link, description, items, emoji_by_sport,
         emoji = emoji_by_sport.get(sport, "🎲")
 
         # Item title: スポーツ速報｜<SPORT>｜<EMOJI> [<SPORT>] <short-title>
-        display_title = f"{sport_label}｜{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
+        display_title = f"{emoji} [{sport_label}] {shorten(it['raw_title'], TITLE_MAX)}"
         summary_short = shorten(it["summary"], DESC_MAX)
 
         fe = fg.add_entry()
@@ -131,7 +168,7 @@ def write_feed(outpath, title, link, description, items, emoji_by_sport,
         fe.title(display_title)
         fe.link(href=it["link"])
 
-        # One CTA at the TOP (👉 + bold+underline) as a markdown link (suppresses image previews in MEE6)
+        # One CTA at the TOP (👉 + bold+underline) as a markdown link (suppresses previews)
         cta_top = f"👉 __**[{cta_text}]({it['bet_url']})**__"
 
         # Article link as markdown (not bare URL) to avoid previews
